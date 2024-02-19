@@ -38,7 +38,7 @@ knxCarousel:
 The KNX Carousel plugin is configured using the `knxCarousel.yaml` file. You can customize various settings to suit your needs. Here's an overview of the available configuration options:
 
 ```yaml
-glastaster_office: # Replace with a unique name for your instance
+mdt_glastaster_office: # Replace with a unique name for your instance
   module: knxCarousel
   class: KnxCarousel
 
@@ -47,32 +47,44 @@ glastaster_office: # Replace with a unique name for your instance
   address:
     - "1/2/3"
     - "2/3/4"
+
   dpt: "16.001" # Default KNX data point type to use
+
+  truncate: 14 # Truncate strings longer then 14
 
   delay: 5 # Delay in seconds between sending objects
 
   objects: # List of objects to send
-    - text: World # Static text object type
+
+    # Static text object type
+    - text: World
 
       # All objects allow for custom formatting
       # Format using curly braces {}
       # This renders to "Hello World!"
-      format: "Hello {}!"
+      format: "Hello {{ payload }}!"
 
+    # Static text with truncating
+    - text: I am super long
 
-    - datetime: "%d.%m.%Y" # Current datetime object type
+      # All objects allow for truncating
+      # This renders to "I am super"
+      truncate: 10 
+
+    # Current datetime object type
+    - datetime: "%d.%m.%Y"
 
       # All objects allow for individual DPT configuration
       dpt: "16.001"
 
     - entity: weather.forecast_home # Home Assistant entity 
       attribute: temperature # Optional attribute of the entity to retrieve
-      format: "Temp: {}°C"
+      format: "Temp: {{ payload | round | int }}°C" # Support Jinja2 formatting
 
       # All objects allow for individual target address configuration
       address: "3/2/1"
 
-  debug: True # Enable or disable debug mode
+  debug: False # Enable or disable debug mode
   debug_level: INFO # Debug level (INFO or DEBUG)
   ascii_encode: False # Enable or disable ASCII encoding for log messages
 ```

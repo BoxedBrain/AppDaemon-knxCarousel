@@ -1,8 +1,13 @@
 # coding: utf8
 
-# Import Home Assistant plugin
+# Import Home Assistant plugin & Jinja2
 import appdaemon.plugins.hass.hassapi as hass
+import jinja2
 
+# Define Jinja2 environment
+jenv = jinja2.Environment()
+
+# Define the AppDaemon plugin class
 class KnxCarousel(hass.Hass):
   def initialize(self):
     self.handle_list = [] # List to store handles for recurring timers
@@ -13,10 +18,11 @@ class KnxCarousel(hass.Hass):
     if not 'debug_level'  in self.args: self.args['debug_level'] = "DEBUG"
     if not 'ascii_encode' in self.args: self.args['ascii_encode'] = True
 
-    self.delay           = self.args['delay']   # Delay between ticks
-    self.default_address = self.args['address'] # Default KNX address
-    self.default_dpt     = self.args['dpt']     # Default KNX data point type
-    self.objects         = self.args['objects'] # List of objects to send to KNX bus
+    self.delay            = self.args.get('delay', 5)   # Delay between ticks
+    self.default_address  = self.args.get('address', None) # Default KNX address
+    self.default_dpt      = self.args.get('dpt', '16.001')     # Default KNX data point type
+    self.default_truncate = self.args.get("truncate", 14) # Default truncate telegrams at 14 bytes 
+    self.objects          = self.args.get('objects', []) # List of objects to send to KNX bus
 
 
     # -------------------- VALIDATE ARGS --------------------
@@ -24,6 +30,11 @@ class KnxCarousel(hass.Hass):
       raise TypeError("delay must be a number (int or float).")
     if self.delay < 0:
       raise ValueError("delay cannot be negative.")
+
+    if not isinstance(self.default_truncate, int):
+      raise TypeError("truncate must be of type integer.")
+    if self.delay < 0:
+      raise ValueError("truncate cannot be negative.")
 
 
     # -------------------- START TICKS ---------------------
@@ -43,46 +54,57 @@ class KnxCarousel(hass.Hass):
 
     # Handle different object types
     match nxt:
-        case 'text': # Static 'text' object type
-            payload = obj['text']
+      case 'text': # Static 'text' object type
+        payload = obj['text']
 
-        case 'datetime': # Current 'datetime' object type
-            now = self.datetime()
-            payload = now.strftime(obj['datetime'])
+      case 'datetime': # Current 'datetime' object type
+        now = self.datetime()
+        payload = now.strftime(obj['datetime'])
 
-        case 'entity': # Home Assistant 'entity' object type
-            entity = self.get_entity(obj['entity'])
-            payload = entity.get_state()
-            if 'attribute' in obj.keys(): payload = entity.get_state(attribute=obj['attribute'])
+      case 'entity': # Home Assistant 'entity' object type
+        entity = self.get_entity(obj['entity'])
+        
+        if 'attribute' in obj.keys(): 
+          payload = entity.get_state(attribute=obj['attribute'])
+        else:
+          payload = entity.get_state()
 
-        case _:
-            # Raise a ValueError for unknown object types
-            raise ValueError("unknown object '{}'".format(nxt))
+      case _:
+        # Raise a ValueError for unknown object types
+        raise ValueError("Unknown object '{}'".format(nxt))
 
-    if not 'format'  in obj.keys(): obj['format']  = "{}"
-    if not 'address' in obj.keys(): obj['address'] = self.default_address
-    if not 'dpt'     in obj.keys(): obj['dpt']     = self.default_dpt
-    payload = obj['format'].format(payload)
+    if not 'format'   in obj.keys(): obj['format']   = "{{ payload }}"
+    if not 'address'  in obj.keys(): obj['address']  = self.default_address
+    if not 'dpt'      in obj.keys(): obj['dpt']      = self.default_dpt
+    if not 'truncate' in obj.keys(): obj['truncate'] = self.default_truncate
+
+    pld = jenv.from_string(obj['format'])
+    payload = pld.render(payload = payload)
 
     if type(obj['address']) is list:
       for addr in obj['address']:
-        self.knx_send(str(payload), str(addr), str(obj['dpt']))
+        self.knx_send(str(payload), str(addr), str(obj['dpt']), int(obj['truncate']))
     else:
-      self.knx_send(str(payload), str(obj['address']), str(obj['dpt']))
+      self.knx_send(str(payload), str(obj['address']), str(obj['dpt']), int(obj['truncate']))
     
     self.tick += 1
 
 
-  def knx_send(self, payload, address, dpt):
+  def knx_send(self, payload, address, dpt, truncate, *args, **kwargs):
+    if payload is None and not isinstance(payload, str):
+      raise TypeError("payload argument must be defined and of type string!")
 
-    if payload is not None and not isinstance(payload, str):
-        raise TypeError("payload must be a string.")
-
-    if address is not None and not isinstance(address, str):
-        raise TypeError("address must be a string.")
+    if address is None and not isinstance(address, str):
+      raise TypeError("address argument must defined and be of type string!")
     
-    if dpt is not None and not isinstance(dpt, str):
-        raise TypeError("dpt must be a string.")
+    if dpt is None and not isinstance(dpt, str):
+      raise TypeError("dpt argument must be defined and of type string!")
+
+    if truncate is not None and not isinstance(truncate, int):
+      raise TypeError("truncate argument must be of type integer!")
+
+    if truncate:
+      payload = payload[:truncate]
 
     self.debug("[KNX msg] '{payload}' to '{address}' DPT: {dpt}".format(payload = payload, address = address, dpt= dpt))
     self.call_service("knx/send", address=address, payload=payload, type=dpt)
@@ -90,8 +112,7 @@ class KnxCarousel(hass.Hass):
 
   def debug(self, message):
     if self.args['debug']:
-        self.log('{message}'.format(message = message), ascii_encode = False, level = self.args["debug_level"])
-        #self.call_service('notify/notify', title = 'Debug', message = text)
+      self.log('{message}'.format(message = message), ascii_encode = False, level = self.args["debug_level"])
 
 
 def terminate(self):
